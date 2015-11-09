@@ -1,0 +1,21 @@
+{
+  "name": "gender-map",
+  "version": "0.0.1",
+  "engines": {
+    "node": "0.10.x"
+  },
+  "dependencies": {
+    "async": "^1.5.0",
+    "geojson-flatten": "^0.1.0",
+    "geojson-normalize": "0.0.0",
+    "lineclip": "^1.1.4",
+    "linematch": "^1.0.2",
+    "minimist": "^1.1.1",
+    "request": "^2.65.0",
+    "tile-cover": "^2.4.1",
+    "tile-reduce": "2.0.0",
+    "tilebelt": "^0.7.1",
+    "turf": "2.0.2",
+    "underscore": "^1.8.3"
+  }
+}
