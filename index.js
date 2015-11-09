@@ -79,7 +79,7 @@ tilereduce.on('end', function (error) {
             } else {
                 var splitNames = [];
                 uniqueNameSplit.forEach(function (element) {
-                    if (dictionaryWords.indexOf(element) !== -1) {
+                    if (dictionaryWords.indexOf(element) == -1) {
                         splitNames.push(element);
                     }
                 });
