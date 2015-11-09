@@ -1,3 +1,5 @@
+'use strict';
+
 var TileReduce = require('tile-reduce');
 var turf = require('turf');
 var _ = require('underscore');
@@ -5,55 +7,59 @@ var async = require('async');
 var request = require('request');
 var argv = require('minimist')(process.argv.slice(2));
 var area = JSON.parse(argv.area);
+var lang = argv.lang || 'en';
 var fs = require('fs');
 var opts = {
   zoom: 15,
   tileLayers: [
-      {
-        name: 'streets',
-        mbtiles: __dirname+'/latest.planet.mbtiles',
-        layers: ['osm']
-      }
-    ],
-  map: __dirname+'/match.js'
+    {
+      name: 'streets',
+      mbtiles: __dirname + '/latest.planet.mbtiles',
+      layers: ['osm']
+    }
+  ],
+  map: __dirname + '/match.js'
 };
 
 var tilereduce = TileReduce(area, opts);
 
 var matched = turf.featurecollection([]);
 
-tilereduce.on('reduce', function(result){
+tilereduce.on('reduce', function(result) {
   matched.features = matched.features.concat(result.features);
 });
 
 tilereduce.on('end', function(error) {
-  var dictionary = {};    
+  var dictionary = {};
   var nameCache = [], uniqueNameCache = [];
-  matched.features.forEach(function(elem, index, array){
+  matched.features.forEach(function(elem, index, array) {
     nameCache.push(elem.properties.name);
   });
 
   uniqueNameCache = _.uniq(nameCache);
-  fs.readFile(__dirname + "/dictionary.txt", 'utf-8', function(error, text) {
-    var words = text.split("\n");
+  fs.readFile(__dirname + '/' + lang + '.txt', 'utf-8', function(error, text) {
+    var words = text.split('\n');
     for (var i = 0; i < words.length; i++) {
       dictionary[ words[i] ] = true;
     }
-    async.mapLimit(uniqueNameCache,10,callNamSor,endOfAsync);
+    async.mapLimit(uniqueNameCache, 10, callNamSor, endOfAsync);
   });
 
-  function endOfAsync(err, result) {
+  function endOfAsync(err, resultArray) {
     var i;
-    //convert result JSON into a proper key-value pair JSON
-    result = JSON.stringify(result);
-    result = result.replace(/\{/g,'').replace(/\}/g,'').replace('[', '{').replace(']','}');
-    result = JSON.parse(result);
 
-    for(i=0; i< matched.features.length;i++){
-        var currentName = matched.features[i].properties.name;
-        if(currentName in result){
-            matched.features[i].properties["gender"] = result[currentName];
-        }
+    var resultObj = {};
+    resultArray.forEach(function(r) {
+      var key = _.keys(r)[0];
+      var value = r[key];
+      resultObj[key] = value;
+    });
+
+    for (i = 0; i < matched.features.length; i++) {
+      var currentName = matched.features[i].properties.name;
+      if (currentName in resultObj) {
+        matched.features[i].properties['gender'] = resultObj[currentName];
+      }
     }
     console.log(JSON.stringify(matched));
 
@@ -61,15 +67,13 @@ tilereduce.on('end', function(error) {
 
   function callNamSor(uniqueName, callback) {
 
-    var uniqueNameSplit = uniqueName.toLowerCase().split(" ");
+    var uniqueNameSplit = uniqueName.toLowerCase().split(' ');
     uniqueNameSplit = nameWithoutTokens(uniqueNameSplit);
     var uniqueNameSplitLength = uniqueNameSplit.length;
 
-    if(uniqueNameSplitLength === 0){
-      callback(null,{"gender" : "ungendered"});
-    }
-
-    else{
+    if (uniqueNameSplitLength === 0) {
+      callback(null, {'gender': 'ungendered'});
+    } else {
       var names = [];
       uniqueNameSplit.forEach(function (element, index, array) {
         if (!dictionary[element]) {
@@ -90,30 +94,29 @@ tilereduce.on('end', function(error) {
         lastName = ' ';
       }
 
-      firstName = (firstName.indexOf('/') != -1) ? '' : firstName;
-      lastName = (firstName.indexOf('/') != -1) ? '' : firstName;
+      firstName = (firstName.indexOf('/') !== -1) ? '' : firstName;
+      lastName = (firstName.indexOf('/') !== -1) ? '' : firstName;
 
       var callbackData = {};
-      if(firstName !== '' && lastName !== ''){
+      if (firstName !== '' && lastName !== '') {
         var options = {
-          url: 'http://api.namsor.com/onomastics/api/json/gender/'+firstName+'/'+lastName+'/fr'
+          url: 'http://api.namsor.com/onomastics/api/json/gender/' + firstName + '/' + lastName + '/' + lang
         };
 
-         request(options,
+        request(options,
           function(error, response, body) {
-          body = JSON.parse(body);
-          callbackData[uniqueName] = body["gender"];
-          callback(null, callbackData);
-        });
-      }
-      else{
+            body = JSON.parse(body);
+            callbackData[uniqueName] = body['gender'];
+            callback(null, callbackData);
+          });
+      } else {
         callback(null, {'gender': 'ungendered'});
       }
     }
   }
 
   function nameWithoutTokens(uniqueNameSplit) {
-    var tokens = ['road', 'street', 'highway', 'marg','rasthe','rasta','raste','rastha','salai','vazhi','dhari', "st", "rd"];
+    var tokens = ['road', 'street', 'highway', 'marg', 'rasthe', 'rasta', 'raste', 'rastha', 'salai', 'vazhi', 'dhari', 'st', 'rd'];
     return _.difference(uniqueNameSplit, tokens);
   }
 
