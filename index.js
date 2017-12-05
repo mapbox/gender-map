@@ -1,159 +1,159 @@
 'use strict';
 
-var TileReduce = require('tile-reduce');
-var turf = require('turf');
-var _ = require('underscore');
-var async = require('async');
-var request = require('request');
-var argv = require('minimist')(process.argv.slice(2));
-var area = JSON.parse(argv.area);
-var config = argv.config;
-var fs = require('fs');
-var opts = {
+const BASE_URL = 'http://api.namsor.com/onomastics/api/json/gender';
+const PLACES_DIRECTORY = `${__dirname}/places`;
+const DICTIONARY_DIRECTORY = `${__dirname}/dictionaries`;
+const TileReduce = require('tile-reduce');
+const turf = require('turf');
+const _ = require('underscore');
+const async = require('async');
+const request = require('request');
+const argv = require('minimist')(process.argv.slice(2));
+const area = JSON.parse(argv.area);
+const place = argv.place;
+const fs = require('fs');
+
+function main() {
+  let matched = turf.featurecollection([]);
+
+  const opts = {
     zoom: 15,
     tileLayers: [
-        {
-            name: 'streets',
-            mbtiles: __dirname + '/latest.planet.mbtiles',
-            layers: ['osm']
-        }
+      {
+        name: 'streets',
+        mbtiles: __dirname + '/latest.planet.mbtiles',
+        layers: ['osm']
+      }
     ],
     map: __dirname + '/match.js'
-};
+  };
+  const tilereduce = TileReduce(area, opts);
 
-var tilereduce = TileReduce(area, opts);
+  let tokens;
+  let names;
+  let whichDictionaries;
 
-var matched = turf.featurecollection([]);
+  let placeJSON = fs.readFileSync(`${PLACES_DIRECTORY}/${place}.json`, 'utf-8');
 
-var tokens;
-var names;
-var whichDictionaries;
+  if (!placeJSON) {
+    console.log(place + 'file doesn\'t exist');
+  } else {
+    placeJSON = JSON.parse(placeJSON);
+  }
 
-var configJSON = fs.readFileSync(__dirname + '/' + config + '.json', 'utf-8');
+  let dictionaryWords = [];
+  tokens = placeJSON['tokens'] || [];
+  names = placeJSON['names'] || {};
+  whichDictionaries = placeJSON['dictionaries'] || [];
 
-if (!configJSON) {
-    console.log(config + 'file doesn\'t exist');
-} else {
-    configJSON = JSON.parse(configJSON);
-}
-
-var dictionaryWords = [];
-tokens = configJSON['tokens'] || [];
-names = configJSON['names'] || {};
-whichDictionaries = configJSON['dictionaries'] || [];
-
-whichDictionaries.forEach(function (el) {
-    var currentDictText = fs.readFileSync(__dirname + '/' + el + '.txt', 'utf-8');
-    var currentDictWords = currentDictText.split(/\r\n|\r|\n/g);
+  whichDictionaries.forEach(function(el) {
+    const currentDictText = fs.readFileSync(`${DICTIONARY_DIRECTORY}/${el}.txt`, 'utf-8');
+    const currentDictWords = currentDictText.split(/\r\n|\r|\n/g);
     dictionaryWords = dictionaryWords.concat(currentDictWords);
-});
+  });
 
-tilereduce.on('reduce', function (result) {
+  tilereduce.on('reduce', (result) => {
     matched.features = matched.features.concat(result.features);
-});
+  });
 
-tilereduce.on('end', function (error) {
-    var nameCache = [], uniqueNameCache = [];
+  tilereduce.on('end', () => {
+    let nameCache = [], uniqueNameCache = [];
 
-    matched.features.forEach(function (elem) {
-        nameCache.push(elem.properties.name);
+    matched.features.forEach(function(elem) {
+      nameCache.push(elem.properties.name);
     });
 
     uniqueNameCache = _.uniq(nameCache);
 
-    async.mapLimit(uniqueNameCache, 10, checkConfig, endOfAsync);
+    async.mapLimit(uniqueNameCache, 10, checkplace, endOfAsync);
 
 
-    function checkConfig(uniqueName, callback) {
-        var callbackData = {};
-        if (uniqueName in names) {
-            callbackData[uniqueName] = names[uniqueName];
-            callback(null, callbackData);
+    function checkplace(uniqueName, callback) {
+      let callbackData = {};
+      if (uniqueName in names) {
+        callbackData[uniqueName] = names[uniqueName];
+        callback(null, callbackData);
+      } else {
+        let uniqueNameSplit = uniqueName.toLowerCase().split(' ');
+        uniqueNameSplit = nameWithoutTokens(uniqueNameSplit);
+
+        if (!uniqueNameSplit.length) {
+          callback(null, { gender: 'ungendered' });
         } else {
-            var uniqueNameSplit = uniqueName.toLowerCase().split(' ');
-            uniqueNameSplit = nameWithoutTokens(uniqueNameSplit);
-            var uniqueNameSplitLength = uniqueNameSplit.length;
-
-            if (uniqueNameSplitLength === 0) {
-                callback(null, {'gender': 'ungendered'});
-            } else {
-                var splitNames = [];
-                uniqueNameSplit.forEach(function (element) {
-                    if (dictionaryWords.indexOf(element) == -1) {
-                        splitNames.push(element);
-                    }
-                });
-
-                // name is things that are not in dictionary
-                // uniqueNameSplit is all of it.
-                var firstName = '';
-                var lastName = '';
-
-                if (splitNames.length > 1) {
-                    firstName = _.initial(splitNames).join(' ');
-                    lastName = _.last(splitNames);
-                } else if (splitNames.length === 1) {
-                    firstName = _.first(splitNames);
-                    lastName = ' ';
-                }
-
-                firstName = (firstName.indexOf('/') !== -1) ? '' : firstName;
-                lastName = (firstName.indexOf('/') !== -1) ? '' : firstName;
-
-                var callbackData = {};
-                if (firstName !== '' && lastName !== '') {
-                    callNamSor(uniqueName, firstName, lastName, function (err, data){
-                        callback(null, data);
-
-                    });
-                } else {
-                    callback(null, {'gender': 'ungendered'});
-                }
+          let splitNames = [];
+          uniqueNameSplit.forEach(function(element) {
+            if (dictionaryWords.indexOf(element) == -1) {
+              splitNames.push(element);
             }
+          });
+
+          let firstName = '';
+          let lastName = '';
+
+          if (splitNames.length > 1) {
+            firstName = _.initial(splitNames).join(' ');
+            lastName = _.last(splitNames);
+          } else if (splitNames.length === 1) {
+            firstName = _.first(splitNames);
+            lastName = ' ';
+          }
+
+          firstName = (firstName.indexOf('/') !== -1) ? null : firstName;
+          lastName = (firstName.indexOf('/') !== -1) ? null : firstName;
+
+          if (firstName && lastName) {
+            callNamSor(uniqueName, firstName, lastName, (err, data) => {
+              callback(null, data);
+
+            });
+          } else {
+            callback(null, { gender: 'ungendered' });
+          }
         }
+      }
 
     }
 
     function callNamSor(uniqueName, firstName, lastName, callback) {
-        var callbackData = {};
-        // var options = {
-        //     url: 'http://api.namsor.com/onomastics/api/json/gender/' + firstName + '/' + lastName + '/' + configJSON.country
-        // };
+      let callbackData = {};
 
-        request('http://api.namsor.com/onomastics/api/json/gender/' + firstName + '/' + lastName + '/' + configJSON["country"], function (error, response, body) {
-            body = JSON.parse(body);
-            callbackData[uniqueName] = body['gender'];
-            // console.log("NAMSOR! " , JSON.stringify(callbackData));
-            callback(null, callbackData);
-        });
+      request(`${BASE_URL}/${firstName}/${lastName}/${placeJSON['country']}`,  (error, response, body) => {
+        body = JSON.parse(body);
+        callbackData[uniqueName] = body['gender'];
+        callback(null, callbackData);
+      });
     }
 
     function endOfAsync(err, resultArray) {
-        var i;
+      console.log('endOfAsync ', matched);
+      let i;
 
-        // console.log("resultArray  " , resultArray);
-        var resultObj = {};
-        resultArray.forEach(function (r) {
-            var key = _.keys(r)[0];
-            var value = r[key];
-            resultObj[key] = value;
-        });
+      let resultObj = {};
+      resultArray.forEach(function(r) {
+        const key = _.keys(r)[0];
+        const value = r[key];
+        resultObj[key] = value;
+      });
 
-        for (i = 0; i < matched.features.length; i++) {
-            var currentName = matched.features[i].properties.name;
-            if (currentName in resultObj) {
-                matched.features[i].properties['gender'] = resultObj[currentName];
-            }
+      for (i = 0; i < matched.features.length; i++) {
+        const currentName = matched.features[i].properties.name;
+        if (currentName in resultObj) {
+          matched.features[i].properties['gender'] = resultObj[currentName];
         }
         console.log(JSON.stringify(matched));
+      }
 
     }
 
     function nameWithoutTokens(uniqueNameSplit) {
-        return _.difference(uniqueNameSplit, tokens);
+      return _.difference(uniqueNameSplit, tokens);
     }
 
-});
+  });
 
 
-tilereduce.run();
+  tilereduce.run();
+
+}
+
+main();
